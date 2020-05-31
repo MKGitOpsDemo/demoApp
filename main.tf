@@ -36,7 +36,7 @@ data "aws_ami" "ubuntu" {
 }
 
 resource "aws_instance" "mgmthost" {
-  ami                    = module.aws_ami.ubuntu.id
+  ami                    = data.aws_ami.ubuntu.id
   instance_type          = "t2.micro"
 #   key_name               = "devops_admin_key2"
 #   vpc_security_group_ids = [aws_security_group.mgmt_node.id]
