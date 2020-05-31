@@ -1,0 +1,189 @@
+version: 2.1
+
+jobs:
+  validate:
+    docker:
+      - image: hashicorp/terraform:light
+    steps:
+      - checkout
+      - run:
+          command: >
+            terraform init 
+            -input=false 
+            -backend-config="key=global/s3/$CIRCLE_BRANCH/terraform.tfstate" 
+            -backend-config="bucket=$TERRAFORM_BUCKET" 
+            /root/project
+      - run:
+          name: Validate
+          command: >
+            terraform validate 
+            /root/project
+
+  deploy:
+    docker:
+      - image: hashicorp/terraform:light
+    steps:
+      - checkout
+      - run:
+          name: Prep Artifacts
+          command: |
+            mkdir /tmp/artifacts;
+            echo `date` > /tmp/artifacts/head;
+            echo $CIRCLE_BRANCH >> /tmp/artifacts/head;
+            echo $CIRCLE_PROJECT_REPONAME >> /tmp/artifacts/head;
+            echo $CIRCLE_PULL_REQUEST >> /tmp/artifacts/head;
+      - run:
+          name: Terraform Init
+          command: >
+            terraform init 
+            -input=false 
+            -backend-config="key=global/s3/$CIRCLE_BRANCH/terraform.tfstate" 
+            -backend-config="bucket=$TERRAFORM_BUCKET" 
+            /root/project
+      - run:
+          name: Terraform Plan
+          command: >
+            terraform plan 
+            -out=/tmp/artifacts/tf_plan
+            /root/project
+      - run:
+          name: Terraform Apply
+          command: >
+            terraform apply 
+            -auto-approve 
+            /root/project
+      - run:
+          name: Store Native Output
+          command: >
+            terraform output 
+            > /tmp/artifacts/tf_out
+      - run:
+          name: Store Output as JSON
+          command: >
+            terraform output
+            -json 
+            > /tmp/artifacts/tf_out.json
+      - run:
+          name: Store Updated Config
+          command: >
+            terraform show
+            -no-color
+            > /tmp/artifacts/tf_show
+      - run:
+          name: Store Updated Config as JSON
+          command: >
+            terraform show
+            -json
+            > /tmp/artifacts/tf_show.json
+      - store_artifacts:
+          path: /tmp/artifacts
+
+  test:
+    docker:
+      - image: cimg/base:2020.01
+    steps:
+      - checkout
+      - run:
+          command: |
+            mkdir /tmp/test-results
+            mkdir /tmp/test-results/dummy
+            echo "<testsuite tests='3'>
+              <testcase classname='foo1' name='ASuccessfulTest'/>
+              <testcase classname='foo2' name='AnotherSuccessfulTest'/>
+              <testcase classname='foo3' name='AFailingTest'>
+                <!--<failure type='NotEnoughFoo'> details about failure </failure>-->
+              </testcase>
+              </testsuite>" > /tmp/test-results/dummy/results.xml
+      - store_test_results:
+          path: /tmp/test-results
+
+workflows:
+  validate_deploy_test_dev:
+    jobs:
+      - validate:
+          context: DevOpsDev
+          filters:
+            branches:
+              only:
+                - /dev-.*/
+
+      - deploy:
+          context: DevOpsDev
+          filters:
+            branches:
+              only:
+                - /dev-.*/
+          requires:
+            - validate
+
+      - test:
+          context: DevOpsDev
+          filters:
+            branches:
+              only:
+                - /dev-.*/
+          requires:
+            - deploy
+
+  validate_deploy_test_qa:
+    jobs:
+      - validate:
+          context: DevOpsQA
+          filters:
+            branches:
+              only:
+                - qa
+
+      - deploy:
+          context: DevOpsQA
+          filters:
+            branches:
+              only:
+                - qa
+          requires:
+            - validate
+
+      - test:
+          context: DevOpsQA
+          filters:
+            branches:
+              only:
+                - qa
+          requires:
+            - deploy
+
+  validate_deploy_test_prod:
+    jobs:
+      - validate:
+          context: DevOpsProd
+          filters:
+            branches:
+              only:
+                - master
+
+      - approve:
+          filters:
+            branches:
+              only:
+                - master
+          type: approval
+          requires:
+            - validate
+
+      - deploy:
+          context: DevOpsProd
+          filters:
+            branches:
+              only:
+                - master
+          requires:
+            - approve
+
+      - test:
+          context: DevOpsProd
+          filters:
+            branches:
+              only:
+                - master
+          requires:
+            - deploy
