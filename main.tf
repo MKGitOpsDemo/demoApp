@@ -6,6 +6,10 @@ terraform {
   }
 }
 
+variable "region" {
+    default = "us-east-1"
+}
+
 provider "aws" {
     profile    = "default"
     region     = var.region
